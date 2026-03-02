@@ -1,22 +1,18 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <ElegantOTA.h>
 #include <BLEProvisioning.h>
 #include <SensorManager.h>
 #include <CloudClient.h>
+#include <RemoteOTA.h>
 
 BLEProvisioning ble("SYL-7482");
 SensorManager sensorManager;
 CloudClient cloudClient;
-AsyncWebServer otaServer(80);
-bool otaServerStarted = false;
-
-// Button configuration
-// Change this to the actual GPIO connected to the button on your PCB.
-// The hardware has the button idle LOW and it becomes HIGH when pressed.
-const uint8_t BUTTON_PIN = 19; // <-- update as needed
+// Pin assignments
+const uint8_t BUTTON_PIN = 8;       // Active LOW
+const uint8_t MOSFET_PIN = 10;      // External power MOSFET control (keep LOW)
+const uint8_t WHITE_LED_PIN = 0;    // Active LOW
+const uint8_t GREEN_LED_PIN = 2;    // Active LOW
 
 // Deep sleep config
 const uint64_t SLEEP_DURATION_SECONDS = 300; // 5 minutes (for testing; change to 3600 for production 1 hour)
@@ -27,8 +23,8 @@ bool isButtonWakeup = false;
 bool isTimerWakeup = false;
 
 // Debounce / press detection
-bool buttonState = LOW;
-bool lastButtonReading = LOW;
+bool buttonState = HIGH;
+bool lastButtonReading = HIGH;
 unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50;
 unsigned long buttonDownTime = 0;
@@ -48,7 +44,7 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    Serial.println("Booting Sylvara firmware");
+    Serial.println("Booting Sylvara firmware v" FIRMWARE_VERSION);  // version from RemoteOTA.h
 
     // Check wakeup reason
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
@@ -76,8 +72,14 @@ void setup() {
     // DEBUG
     Serial.println("Battery voltage: " + String(analogRead(1) * 9.5035 * pow(10, -4), 2));
 
-    // Configure button pin (assumes external pull-down so use INPUT)
-    pinMode(BUTTON_PIN, INPUT);
+    // Configure pins
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    pinMode(MOSFET_PIN, OUTPUT);
+    digitalWrite(MOSFET_PIN, LOW);
+    pinMode(WHITE_LED_PIN, OUTPUT);
+    digitalWrite(WHITE_LED_PIN, HIGH);  // OFF (active low)
+    pinMode(GREEN_LED_PIN, OUTPUT);
+    digitalWrite(GREEN_LED_PIN, HIGH);  // OFF (active low)
 
     // Initialize sensors
     if (!sensorManager.begin()) {
@@ -89,21 +91,10 @@ void setup() {
 
     ble.begin();
 
-    // Initialize ElegantOTA (server starts when WiFi connects)
-    ElegantOTA.begin(&otaServer);
 }
 
 void loop() {
     ble.loop();
-    ElegantOTA.loop();
-
-    // Start OTA server once WiFi connects
-    if (WiFi.status() == WL_CONNECTED && !otaServerStarted) {
-        otaServer.begin();
-        otaServerStarted = true;
-        Serial.println("[OTA] ElegantOTA available at http://" + WiFi.localIP().toString() + "/update");
-    }
-
     // If woken by timer, post sensor data and go back to sleep
     if (isTimerWakeup) {
         Serial.println("\n========== TIMER WAKEUP CYCLE ==========");
@@ -145,6 +136,9 @@ void loop() {
         }
 
         if (WiFi.status() == WL_CONNECTED) {
+            // Check for firmware updates before anything else
+            RemoteOTA::check();
+
             Serial.println("[WIFI] Connected! Posting sensor data...");
             cloudClient.postSensorData(sensorData, "SYL-7482");
             Serial.println("[CLOUD] Data post complete");
@@ -167,6 +161,7 @@ void loop() {
         Serial.println("Button actions:");
         Serial.println("  - SINGLE PRESS: Enable BLE provisioning");
         Serial.println("  - DOUBLE PRESS: Clear stored WiFi credentials");
+        Serial.println("  - TRIPLE PRESS: Check for remote firmware update");
         Serial.println("  - LONG PRESS: Debug output");
         Serial.println("===================================\n");
         isButtonWakeup = false;
@@ -182,11 +177,11 @@ void loop() {
     if ((millis() - lastDebounceTime) > debounceDelay) {
         if (reading != buttonState) {
             buttonState = reading;
-            if (buttonState == HIGH) {
-                // button pressed down
+            if (buttonState == LOW) {
+                // button pressed down (active low)
                 buttonDownTime = millis();
             } else {
-                // button released -> check duration
+                // button released (back to HIGH) -> check duration
                 unsigned long pressDuration = millis() - buttonDownTime;
                 if (pressDuration >= longPressMillis) {
                     // Long press detected
@@ -211,6 +206,9 @@ void loop() {
         } else if (pressCount == 2) {
             Serial.println("Button: DOUBLE PRESS -> clearing stored credentials");
             BLEProvisioning::clearStoredCredentials();
+        } else if (pressCount == 3) {
+            Serial.println("Button: TRIPLE PRESS -> checking for remote firmware update");
+            RemoteOTA::check();
         } else {
             Serial.print("Button: MULTI PRESS (count=");
             Serial.print(pressCount);

@@ -277,23 +277,22 @@ void BLEProvisioning::goDeepSleep(uint64_t sleepDurationMicros) {
     Serial.println(" seconds");
     Serial.println("Wakeup sources enabled:");
     Serial.println("  - RTC Timer (primary)");
-    Serial.println("  - GPIO 19 button (secondary)");
+    Serial.println("  - GPIO 8 button (secondary)");
     Serial.println("========================================\n");
     Serial.flush();
 
     // Disable WiFi and BLE before sleep to save power
     WiFi.disconnect(true);  // turn off radio
     BLEDevice::deinit(true);
-    
+
     // Configure RTC timer to wake from deep sleep
     esp_sleep_enable_timer_wakeup(sleepDurationMicros);
     Serial.println("[SLEEP] RTC timer enabled");
 
-    // Configure GPIO 19 (button) as wakeup source
-    // This uses the newer unified GPIO wakeup API for ESP32-C3
+    // Configure GPIO 8 (button) as wakeup source (active LOW)
     esp_sleep_enable_gpio_wakeup();
-    gpio_wakeup_enable(GPIO_NUM_19, GPIO_INTR_HIGH_LEVEL);
-    Serial.println("[SLEEP] GPIO 19 button wakeup enabled (HIGH level)");
+    gpio_wakeup_enable(GPIO_NUM_8, GPIO_INTR_LOW_LEVEL);
+    Serial.println("[SLEEP] GPIO 8 button wakeup enabled (LOW level)");
     
     Serial.println("[SLEEP] Entering deep sleep now...");
     Serial.println("[SLEEP] Device will wake on: timer OR button press");

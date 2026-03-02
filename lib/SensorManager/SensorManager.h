@@ -5,8 +5,8 @@
 #include <Adafruit_SHT31.h>
 
 // I2C Pins
-#define SDA_PIN  4
-#define SCL_PIN  5
+#define SDA_PIN  6
+#define SCL_PIN  7
 
 // ADC Pins
 #define BAT_ADC    1        // GPIO1 - battery voltage
